@@ -1,0 +1,11 @@
+# !data/raw/nettoyage.ipynb
+data/**/*.csv
+data/**/*.md
+nettoyage.md
+capture_consignes.png
+codex*
+etude_statis*
+.env
+note.md
+prompt_slide.md
+reports/**/*.csv

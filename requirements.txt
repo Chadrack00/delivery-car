@@ -1,0 +1,7 @@
+django
+notebook
+jupyter
+pandas
+numpy
+matplotlib
+djangostreetmap

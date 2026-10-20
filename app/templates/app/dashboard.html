@@ -1,0 +1,175 @@
+{% load static %}
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>LaDe · Analyse des anomalies</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.15.0/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="{% static 'app/dashboard.css' %}">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="LaDe tableau de bord">
+        <span class="brand-mark">L</span>
+        <span><strong>LaDe</strong><small>Delivery intelligence</small></span>
+      </a>
+      <div class="topbar-center">
+        <span class="eyebrow">ESPACE D’ANALYSE</span>
+        <strong>Détection des anomalies</strong>
+      </div>
+      <button id="themeToggle" class="theme-toggle" type="button" aria-label="Activer le mode nuit" aria-pressed="false"><span class="theme-icon" aria-hidden="true">☾</span><span class="theme-label">Mode nuit</span></button>
+      <div class="dataset-switch" role="tablist" aria-label="Type de tâche">
+        <button class="dataset-tab active" data-dataset="pickup" role="tab" aria-selected="true">Pickup</button>
+        <button class="dataset-tab" data-dataset="delivery" role="tab" aria-selected="false">Delivery</button>
+      </div>
+    </header>
+
+    <div class="page-layout">
+      <aside class="city-sidebar">
+        <div class="side-label">VILLE</div>
+        <nav id="cityNav" class="city-nav" aria-label="Sélectionner une ville">
+          {% for city in cities %}
+          <button class="city-button{% if forloop.first %} active{% endif %}" data-city="{{ city.code }}">
+            <span class="city-dot"></span>{{ city.name }}
+          </button>
+          {% endfor %}
+        </nav>
+        <div class="sidebar-note"><span class="live-dot"></span> Lignes de la ville<br><strong id="cityTotalRows">—</strong><br><small>Dans le fichier traité</small><br><span>Lignes sur la période</span><br><strong id="cityRowCount">—</strong></div>
+      </aside>
+
+      <aside class="value-sidebar">
+        <div class="value-head">
+          <div class="side-label">VALEURS DISTINCTES</div>
+          <span id="valueCount" class="count-pill">—</span>
+        </div>
+        <label class="search-box">
+          <span>⌕</span><input id="valueSearch" type="search" placeholder="Rechercher une valeur…" autocomplete="off">
+        </label>
+        <div id="valueList" class="value-list"><div class="empty-state">Chargement des valeurs…</div></div>
+      </aside>
+
+      <main class="main-content">
+        <section class="page-heading">
+          <div>
+            <div class="breadcrumb"><span id="breadcrumbDataset">Pickup</span><span>/</span><span id="breadcrumbCity">Shanghai</span></div>
+            <h1 id="mainTitle">Analyse des courses</h1>
+            <p class="subheading">Explorez les durées, les créneaux et la qualité des coordonnées GPS.</p>
+            <p id="printMeta" class="print-meta"></p>
+          </div>
+          <button id="printButton" class="button button-outline print-button" type="button"><span>⎙</span> Imprimer le rapport</button>
+        </section>
+
+        <section class="control-panel">
+          <div class="control-topline">
+            <div class="variable-control">
+              <span class="control-label">REGROUPER PAR</span>
+              <div id="variableNav" class="variable-tabs" role="tablist" aria-label="Variable de regroupement">
+                <button class="variable-tab" data-variable="region_id">Région <code>region_id</code></button>
+                <button class="variable-tab active" data-variable="courier_id">Coursier <code>courier_id</code></button>
+                <button class="variable-tab" data-variable="aoi_id">Zone <code>aoi_id</code></button>
+              </div>
+            </div>
+            <div class="date-controls">
+              <label><span class="control-label">DU</span><input id="dateStart" type="date" value="2022-05-01"></label>
+              <span class="date-separator">→</span>
+              <label><span class="control-label">AU</span><input id="dateEnd" type="date" value="2022-10-31"></label>
+            </div>
+          </div>
+          <div class="control-bottomline">
+            <div class="range-caption"><span class="calendar-icon">▦</span><span id="rangeLabel">Période sélectionnée</span></div>
+            <div class="analysis-switch">
+              <button id="previousPanel" class="arrow-button" type="button" aria-label="Analyse précédente">‹</button>
+              <span id="panelPosition" class="panel-position">01 / 04</span>
+              <button id="nextPanel" class="arrow-button" type="button" aria-label="Analyse suivante">›</button>
+              <span class="switch-divider"></span>
+              <select id="panelSelect" aria-label="Type d'analyse">
+                <option value="records">Courses sélectionnées</option>
+                <option value="groups">Répartition par valeur</option>
+                <option value="gps">Qualité GPS</option>
+                <option value="couriers">Variabilité coursiers</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
+        <div id="loadingState" class="loading-state"><span class="spinner"></span> Lecture des données de la ville…</div>
+        <div id="errorState" class="error-state hidden"></div>
+
+        <section id="recordsPanel" class="analysis-panel">
+          <div class="metric-grid">
+            <article class="metric-card"><div class="metric-label">TÂCHES DANS LA SÉLECTION</div><div id="metricTasks" class="metric-value">—</div><div class="metric-foot">Selon les filtres actifs</div></article>
+            <article class="metric-card"><div class="metric-label">DURÉE MÉDIANE</div><div id="metricMedian" class="metric-value">—</div><div class="metric-foot">La moitié des tâches dure moins, l’autre moitié plus</div></article>
+            <article class="metric-card"><div class="metric-label">INTERVALLE INTERQUARTILE (Q1–Q3)</div><div id="metricIqr" class="metric-value">—</div><div id="metricIqrFoot" class="metric-foot">Durées des 50 % de tâches centrales ; IQR = Q3 − Q1</div></article>
+            <article class="metric-card"><div class="metric-label">Identifiant coursier manquant</div><div id="metricCourierMissing" class="metric-value">—</div><div id="metricCourierMissingFoot" class="metric-foot">Valeurs manquantes dans la ville et la période</div></article>
+            <article class="metric-card accent-card"><div class="metric-label">TAUX SELON LA RÈGLE 0 / 1</div><div id="metricStatus" class="metric-value">—</div><div class="metric-foot">Pickup uniquement · voir formule</div></article>
+          </div>
+
+          <div class="records-analysis-grid">
+            <article class="card table-card">
+              <div class="card-heading table-heading"><div><h2>Courses du groupe</h2><p id="recordsCaption">Chaque ligne correspond à une tâche.</p></div><button id="exportRows" class="button button-ghost" type="button">Exporter cette page</button></div>
+              <div class="table-scroll"><table><thead id="taskHead"></thead><tbody id="taskBody"></tbody></table></div>
+              <div class="table-pagination"><span id="pageCaption" class="table-footnote"></span><div><button id="previousPage" class="button button-ghost" type="button">Précédent</button><button id="nextPage" class="button button-ghost" type="button">Suivant</button></div></div>
+            </article>
+            <div class="records-side">
+              <article class="card chart-card">
+                <div class="card-heading"><div><h2>Respect du créneau</h2><p id="selectedGroupLabel">Sélectionnez une valeur dans la liste.</p></div><span class="card-icon">◉</span></div>
+                <div id="statusChart" class="chart-area"></div>
+                <div id="statusLegend" class="chart-legend"></div>
+                <div id="pickupRule" class="formula-note">Règle pickup : 0 si <code>time_window_start − pickup_time &gt; 0</code>, sinon 1.</div>
+                <div id="totalPickup" class="total-line"></div>
+              </article>
+              <article class="card chart-card">
+                <div class="card-heading"><div><h2>Volume par valeur</h2><p>Nombre de courses dans la période filtrée</p></div><span class="card-icon blue-icon">▥</span></div>
+                <div id="groupChart" class="chart-area"></div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section id="groupsPanel" class="analysis-panel hidden">
+          <div class="metric-grid compact-metrics">
+            <article class="metric-card"><div class="metric-label">VALEURS DISTINCTES</div><div id="groupCountMetric" class="metric-value">—</div><div class="metric-foot">Valeurs présentes dans la période</div></article>
+            <article class="metric-card"><div class="metric-label">TOTAL DES COURSES</div><div id="groupTotalMetric" class="metric-value">—</div><div class="metric-foot">Tous les groupes affichés</div></article>
+          </div>
+          <article class="card chart-card large-chart"><div class="card-heading"><div><h2>Nombre de courses par <span class="variable-title">variable</span></h2><p>Les groupes les plus actifs dans la période sélectionnée</p></div></div><div id="allGroupsChart" class="chart-area"></div></article>
+          <article class="card table-card"><div class="card-heading"><div><h2>Tableau des groupes</h2><p>Volumes calculés sur toutes les lignes filtrées.</p></div></div><div class="table-scroll"><table><thead><tr><th>Valeur</th><th>Nombre de courses</th><th>Part du total</th></tr></thead><tbody id="groupsBody"></tbody></table></div></article>
+        </section>
+
+        <section id="gpsPanel" class="analysis-panel hidden">
+          <div class="metric-grid compact-metrics">
+            <article class="metric-card"><div class="metric-label">TÂCHES ANALYSÉES</div><div id="gpsTaskCount" class="metric-value">—</div><div class="metric-foot">Sur l’intervalle d’acceptation</div></article>
+            <article class="metric-card"><div class="metric-label">DISTANCE MÉDIANE</div><div id="gpsMedian" class="metric-value">—</div><div class="metric-foot">Point de tâche → GPS de fin</div></article>
+            <article class="metric-card"><div class="metric-label">90e PERCENTILE</div><div id="gpsP90" class="metric-value">—</div><div class="metric-foot">Distribution des distances à vol d’oiseau</div></article>
+            <article class="metric-card"><div class="metric-label">COORDONNÉES INCOMPLÈTES</div><div id="gpsMissing" class="metric-value">—</div><div class="metric-foot">Part moyenne des champs GPS vides</div></article>
+          </div>
+          <div class="content-grid">
+            <article class="card chart-card"><div class="card-heading"><div><h2>Coordonnées GPS manquantes</h2><p>Taux par colonne dans les tâches filtrées.</p></div></div><div id="gpsMissingChart" class="chart-area"></div></article>
+            <article class="card chart-card"><div class="card-heading"><div><h2>Écart géographique</h2><p>Distance entre le point de tâche et le GPS associé à la fin.</p></div></div><div id="distanceChart" class="chart-area"></div><div class="formula-note">Cette distance est calculée à vol d’oiseau ; elle ne représente pas un itinéraire routier.</div></article>
+          </div>
+          <article class="card table-card"><div class="card-heading"><div><h2>Qualité des coordonnées</h2><p>Valeurs manquantes observées dans les colonnes GPS.</p></div></div><div class="table-scroll"><table><thead><tr><th>Colonne GPS</th><th>Valeurs manquantes</th><th>Taux</th></tr></thead><tbody id="gpsBody"></tbody></table></div></article>
+          <article class="card notice-card"><strong>Comparaison d’itinéraire OpenStreetMap</strong><p>Dans le tableau des courses, utilise « Comparer OSM » pour afficher sur la carte le trajet routier calculé par OSRM, avec les points GPS de départ et d’arrivée. La comparaison confronte cette estimation à la durée enregistrée entre acceptation et fin ; elle ne prouve pas à elle seule une anomalie. L’estimation ne tient pas compte des attentes, des arrêts ni du trafic en temps réel. Le serveur public OSRM est fourni sans garantie de disponibilité et limite son usage à une requête par seconde.</p><p>Fond cartographique OpenFreeMap · © OpenMapTiles · données <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · moteur d’itinéraire <a href="https://project-osrm.org/" target="_blank" rel="noopener">OSRM</a>.</p></article>
+        </section>
+
+        <section id="couriersPanel" class="analysis-panel hidden">
+          <div class="metric-grid compact-metrics">
+            <article class="metric-card"><div class="metric-label">COURSIERS AVEC TÂCHES</div><div id="courierCountMetric" class="metric-value">—</div><div class="metric-foot">Dans la ville et la période choisies</div></article>
+            <article class="metric-card"><div class="metric-label">DURÉE MÉDIANE GLOBALE</div><div id="courierMedianMetric" class="metric-value">—</div><div class="metric-foot">Médiane des médianes par coursier</div></article>
+          </div>
+          <div class="content-grid">
+            <article class="card chart-card"><div class="card-heading"><div><h2>Nombre de courses par coursier</h2><p>Les 20 coursiers avec le plus de tâches.</p></div></div><div id="courierChart" class="chart-area"></div></article>
+            <article class="card chart-card"><div class="card-heading"><div><h2>Durée médiane par coursier</h2><p>Comparaison pour les 20 coursiers les plus actifs.</p></div></div><div id="courierDurationChart" class="chart-area"></div></article>
+          </div>
+          <article class="card table-card"><div class="card-heading"><div><h2>Variabilité entre coursiers</h2><p>Durée totale : somme des durées de tâches complètes. La médiane partage les tâches en deux moitiés ; Q1–Q3 contient les 50 % centraux.</p></div></div><div class="table-scroll"><table><thead><tr><th>Ville</th><th>Coursier</th><th>Nombre de tâches</th><th>Durée totale (h)</th><th>Durée médiane (min)</th><th>Q1 (min)</th><th>Q3 (min)</th></tr></thead><tbody id="courierBody"></tbody></table></div></article>
+        </section>
+
+        <footer class="page-footer"><span>LaDe · Analyse exploratoire des tâches</span><span>Les statistiques sont calculées à partir de <code>data/processed</code>.</span></footer>
+      </main>
+    </div>
+  </div>
+  {% csrf_token %}
+  <script src="{% static 'app/dashboard.js' %}" defer></script>
+</body>
+</html>
